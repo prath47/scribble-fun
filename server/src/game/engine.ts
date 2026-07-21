@@ -1,4 +1,5 @@
-import { WORDS } from "../data/words.js"
+import { recordMatch } from "../db/matches.js"
+import { getWordsForPack } from "../db/wordPacks.js"
 import { broadcast, sendTo, toSnapshot } from "../rooms/store.js"
 import type { ChatEntry, Player, RoomState } from "../types.js"
 
@@ -20,8 +21,9 @@ function clearTimers(room: RoomState): void {
 }
 
 function pickWordOptions(room: RoomState): string[] {
-  const pool = WORDS.filter((w) => !room.usedWords.has(w))
-  const source = pool.length >= WORD_OPTIONS_COUNT ? pool : WORDS
+  const words = getWordsForPack(room.wordPackId)
+  const pool = words.filter((w) => !room.usedWords.has(w))
+  const source = pool.length >= WORD_OPTIONS_COUNT ? pool : words
   const picked: string[] = []
   const candidates = [...source]
   while (picked.length < WORD_OPTIONS_COUNT && candidates.length > 0) {
@@ -36,6 +38,12 @@ function blanksFor(word: string, revealed: Set<number>): string {
     .split("")
     .map((ch, i) => (ch === " " ? " " : revealed.has(i) ? ch : "_"))
     .join(" ")
+}
+
+/** Recomputes the current round's blanks pattern at any point in time (e.g. for a reconnecting client). */
+export function getCurrentBlanks(room: RoomState): string | null {
+  if (!room.currentWord) return null
+  return blanksFor(room.currentWord, room.revealedHintIndices)
 }
 
 function systemChat(room: RoomState, text: string): void {
@@ -69,6 +77,9 @@ export function nextTurn(room: RoomState): void {
   if (room.drawOrderIndex >= room.totalRounds || room.drawOrder.length < 2) {
     room.phase = "game_end"
     room.currentDrawerId = null
+    if (room.roundNumber > 0) {
+      recordMatch(room.code, Array.from(room.players.values()), room.roundNumber, room.wordPackId)
+    }
     broadcast(room, { type: "room-update", room: toSnapshot(room) })
     return
   }
@@ -107,14 +118,15 @@ export function chooseWord(room: RoomState, playerId: string, word: string): voi
 export function startRound(room: RoomState, word: string): void {
   clearTimers(room)
   room.phase = "drawing"
+  room.currentStrokes = []
   room.currentWord = word
   room.usedWords.add(word)
   room.pendingWordOptions = []
   room.guessedPlayerIds = new Set()
   room.roundEndsAt = Date.now() + ROUND_DURATION_MS
+  room.revealedHintIndices = new Set()
 
-  const revealed = new Set<number>()
-  const blanks = blanksFor(word, revealed)
+  const blanks = blanksFor(word, room.revealedHintIndices)
 
   broadcast(room, { type: "round-start", room: toSnapshot(room), blanks, endsAt: room.roundEndsAt })
   if (room.currentDrawerId) {
@@ -129,11 +141,11 @@ export function startRound(room: RoomState, word: string): void {
         const candidates = room.currentWord
           .split("")
           .map((ch, idx) => ({ ch, idx }))
-          .filter(({ ch, idx }) => ch !== " " && !revealed.has(idx))
+          .filter(({ ch, idx }) => ch !== " " && !room.revealedHintIndices.has(idx))
         if (candidates.length === 0) return
         const pick = candidates[Math.floor(Math.random() * candidates.length)]
-        revealed.add(pick.idx)
-        broadcast(room, { type: "hint-update", blanks: blanksFor(room.currentWord, revealed) })
+        room.revealedHintIndices.add(pick.idx)
+        broadcast(room, { type: "hint-update", blanks: blanksFor(room.currentWord, room.revealedHintIndices) })
       },
       (ROUND_DURATION_MS * i) / (hintCount + 1),
     )

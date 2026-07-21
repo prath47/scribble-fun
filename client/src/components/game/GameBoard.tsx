@@ -26,6 +26,7 @@ export function GameBoard({ selfId, connection }: GameBoardProps) {
     revealedWord,
     chatMessages,
     lastGuessCorrect,
+    initialStrokes,
     chooseWord,
     sendChat,
     sendStroke,
@@ -98,6 +99,7 @@ export function GameBoard({ selfId, connection }: GameBoardProps) {
               color={color}
               brushSize={brushSize}
               roundKey={room.roundNumber}
+              initialStrokes={initialStrokes}
               subscribeStroke={subscribeStroke}
               onStroke={sendStroke}
             />

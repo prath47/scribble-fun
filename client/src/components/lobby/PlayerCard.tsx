@@ -10,7 +10,12 @@ interface PlayerCardProps {
 
 export function PlayerCard({ player, isSelf }: PlayerCardProps) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-lg border border-border bg-muted/50 p-4 text-center">
+    <div
+      className={cn(
+        "flex flex-col items-center gap-2 rounded-lg border border-border bg-muted/50 p-4 text-center",
+        !player.connected && "opacity-50",
+      )}
+    >
       <div className="relative">
         <img
           src={avatarSrc(player.avatarId)}
@@ -23,6 +28,7 @@ export function PlayerCard({ player, isSelf }: PlayerCardProps) {
         {player.name}
         {isSelf && " (you)"}
       </span>
+      {!player.connected && <span className="text-xs text-muted-foreground">Reconnecting…</span>}
     </div>
   )
 }

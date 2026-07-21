@@ -20,6 +20,11 @@ lerna-debug.log*
 .env.local
 .env.*.local
 
+# SQLite data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
 # Editor / OS
 .vscode/*
 !.vscode/extensions.json

@@ -11,12 +11,13 @@ interface DrawingCanvasProps {
   color: string
   brushSize: number
   roundKey: number
+  initialStrokes: StrokeEvent[]
   subscribeStroke: (cb: (event: StrokeEvent) => void) => () => void
   onStroke: (points: [number, number][], color: string, size: number, start: boolean) => void
 }
 
 export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(function DrawingCanvas(
-  { isDrawer, color, brushSize, roundKey, subscribeStroke, onStroke },
+  { isDrawer, color, brushSize, roundKey, initialStrokes, subscribeStroke, onStroke },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -25,18 +26,24 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
   const isFirstFlushRef = useRef(true)
   const rafIdRef = useRef<number | null>(null)
 
+  // fresh white canvas on mount / new round, then replay any buffered strokes
+  // (populated on reconnect mid-round so the canvas doesn't come up blank)
+  useEffect(() => {
+    const ctx = canvasRef.current?.getContext("2d")
+    if (!ctx) return
+    clearCanvasContext(ctx)
+    for (const event of initialStrokes) {
+      if (event.type === "canvas-clear") clearCanvasContext(ctx)
+      else renderStrokeSegment(ctx, event.points, event.color, event.size, event.start)
+    }
+  }, [roundKey, initialStrokes])
+
   useImperativeHandle(ref, () => ({
     clearLocal: () => {
       const ctx = canvasRef.current?.getContext("2d")
       if (ctx) clearCanvasContext(ctx)
     },
   }))
-
-  // fresh white canvas on mount and on every new round
-  useEffect(() => {
-    const ctx = canvasRef.current?.getContext("2d")
-    if (ctx) clearCanvasContext(ctx)
-  }, [roundKey])
 
   useEffect(() => {
     return subscribeStroke((event) => {

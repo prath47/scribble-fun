@@ -5,6 +5,8 @@ import { toast } from "sonner"
 import { AnimatedTitle } from "@/components/landing/AnimatedTitle"
 import { AvatarPicker } from "@/components/landing/AvatarPicker"
 import { InfoFooter } from "@/components/landing/InfoFooter"
+import { RecentGames } from "@/components/landing/RecentGames"
+import { WordPackPicker } from "@/components/landing/WordPackPicker"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -15,6 +17,7 @@ import { createRoom, roomExists } from "@/lib/api"
 export function LandingPage() {
   const { identity, update } = usePlayerIdentity()
   const [roomCode, setRoomCode] = useState("")
+  const [wordPackId, setWordPackId] = useState("default")
   const [loading, setLoading] = useState<"join" | "create" | null>(null)
   const navigate = useNavigate()
 
@@ -35,7 +38,7 @@ export function LandingPage() {
         }
         goToRoom(trimmed)
       } else {
-        const code = await createRoom()
+        const code = await createRoom(wordPackId)
         goToRoom(code)
       }
     } catch {
@@ -49,7 +52,7 @@ export function LandingPage() {
     if (!nameValid) return toast.error("Enter a name first")
     setLoading("create")
     try {
-      const code = await createRoom()
+      const code = await createRoom(wordPackId)
       goToRoom(code)
     } catch {
       toast.error("Something went wrong, try again")
@@ -104,6 +107,8 @@ export function LandingPage() {
 
           <AvatarPicker avatarId={identity.avatarId} onAvatarChange={(avatarId) => update({ avatarId })} />
 
+          <WordPackPicker value={wordPackId} onChange={setWordPackId} />
+
           <Input
             placeholder="Room code (optional)"
             value={roomCode}
@@ -133,6 +138,7 @@ export function LandingPage() {
       </Card>
       </motion.div>
 
+      <RecentGames />
       <InfoFooter />
     </motion.div>
   )

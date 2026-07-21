@@ -25,6 +25,10 @@ export interface RoomState {
   sockets: Map<string, WebSocket>
   createdAt: number
   cleanupTimer: NodeJS.Timeout | null
+  playerTokens: Map<string, string>
+  disconnectTimers: Map<string, NodeJS.Timeout>
+  currentStrokes: StrokeEvent[]
+  wordPackId: string | null
 
   phase: GamePhase
   drawOrder: string[]
@@ -37,6 +41,7 @@ export interface RoomState {
   roundEndsAt: number | null
   guessedPlayerIds: Set<string>
   usedWords: Set<string>
+  revealedHintIndices: Set<number>
   timers: RoomTimers
 }
 
@@ -60,8 +65,21 @@ export interface ChatEntry {
   kind: ChatKind
 }
 
+export type StrokeEvent =
+  | { type: "stroke"; points: [number, number][]; color: string; size: number; start: boolean }
+  | { type: "canvas-clear" }
+
 export type ServerMessage =
-  | { type: "room-state"; room: RoomSnapshot; selfId: string }
+  | {
+      type: "room-state"
+      room: RoomSnapshot
+      selfId: string
+      token: string
+      strokes: StrokeEvent[]
+      blanks: string | null
+      endsAt: number | null
+      revealedWord: string | null
+    }
   | { type: "room-update"; room: RoomSnapshot }
   | { type: "word-options"; words: string[] }
   | { type: "your-word"; word: string }
@@ -70,14 +88,12 @@ export type ServerMessage =
   | { type: "round-reveal"; room: RoomSnapshot; word: string }
   | { type: "chat"; entry: ChatEntry }
   | { type: "guess-result"; correct: boolean }
-  | { type: "stroke"; points: [number, number][]; color: string; size: number; start: boolean }
-  | { type: "canvas-clear" }
   | { type: "error"; message: string }
+  | StrokeEvent
 
 export type ClientMessage =
-  | { type: "join"; name: string; avatarId: string }
+  | { type: "join"; name: string; avatarId: string; token?: string }
   | { type: "start-game" }
   | { type: "choose-word"; word: string }
-  | { type: "stroke"; points: [number, number][]; color: string; size: number; start: boolean }
-  | { type: "canvas-clear" }
   | { type: "chat"; text: string }
+  | StrokeEvent

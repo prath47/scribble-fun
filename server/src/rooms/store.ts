@@ -1,12 +1,17 @@
 import { randomUUID } from "node:crypto"
+import type { WebSocket } from "ws"
+import { getRoomOwner, registerRoomOwner } from "../redis/registry.js"
+import { loadRoomSnapshot } from "../redis/snapshot.js"
+import { INSTANCE_ID } from "../instanceId.js"
 import type { Player, RoomSnapshot, RoomState, ServerMessage } from "../types.js"
 import { generateRoomCode } from "./roomCode.js"
 
 const IDLE_CLEANUP_MS = 30_000
+const DISCONNECT_GRACE_MS = 20_000
 
 const rooms = new Map<string, RoomState>()
 
-export function createRoom(): RoomState {
+export function createRoom(wordPackId: string | null = null): RoomState {
   const code = generateRoomCode((c) => rooms.has(c))
   const room: RoomState = {
     code,
@@ -15,6 +20,10 @@ export function createRoom(): RoomState {
     sockets: new Map(),
     createdAt: Date.now(),
     cleanupTimer: null,
+    playerTokens: new Map(),
+    disconnectTimers: new Map(),
+    currentStrokes: [],
+    wordPackId,
 
     phase: "lobby",
     drawOrder: [],
@@ -27,17 +36,41 @@ export function createRoom(): RoomState {
     roundEndsAt: null,
     guessedPlayerIds: new Set(),
     usedWords: new Set(),
+    revealedHintIndices: new Set(),
     timers: { roundTimer: null, hintTimers: [], chooseWordTimer: null, nextTurnTimer: null },
   }
   rooms.set(code, room)
+  void registerRoomOwner(code)
   return room
 }
 
-export function getRoom(code: string): RoomState | undefined {
-  return rooms.get(code.toUpperCase())
+/**
+ * Looks up a room. If it isn't held in this instance's memory, checks whether another
+ * instance still owns it in Redis (multi-instance mode) -- if so, this room isn't ours
+ * to serve. If ownership has lapsed (the owner crashed and its TTL expired), rehydrates
+ * the room from its last Redis snapshot and claims ownership.
+ */
+export async function getRoom(code: string): Promise<RoomState | undefined> {
+  const upper = code.toUpperCase()
+  const existing = rooms.get(upper)
+  if (existing) return existing
+
+  const owner = await getRoomOwner(upper)
+  if (owner && owner.instanceId !== INSTANCE_ID) return undefined // alive elsewhere; not mine to take
+
+  const snapshot = await loadRoomSnapshot(upper)
+  if (!snapshot) return undefined
+
+  rooms.set(upper, snapshot)
+  void registerRoomOwner(upper)
+  return snapshot
 }
 
-export function addPlayer(room: RoomState, name: string, avatarId: string): Player {
+export function listRooms(): RoomState[] {
+  return Array.from(rooms.values())
+}
+
+export function addPlayer(room: RoomState, name: string, avatarId: string): { player: Player; token: string } {
   const player: Player = {
     id: randomUUID(),
     name: name.trim().slice(0, 20) || "Player",
@@ -48,14 +81,56 @@ export function addPlayer(room: RoomState, name: string, avatarId: string): Play
   }
   if (player.isHost) room.hostId = player.id
   room.players.set(player.id, player)
+
+  const token = randomUUID()
+  room.playerTokens.set(token, player.id)
+
+  cancelCleanup(room)
+  return { player, token }
+}
+
+export function restorePlayer(room: RoomState, token: string, socket: WebSocket): Player | null {
+  const playerId = room.playerTokens.get(token)
+  if (!playerId) return null
+  const player = room.players.get(playerId)
+  if (!player) return null
+
+  const timer = room.disconnectTimers.get(playerId)
+  if (timer) {
+    clearTimeout(timer)
+    room.disconnectTimers.delete(playerId)
+  }
+
+  player.connected = true
+  room.sockets.set(playerId, socket)
   cancelCleanup(room)
   return player
 }
 
-export function removePlayer(room: RoomState, playerId: string): void {
+/** Soft-disconnect: keeps the player's seat/score, gives them a grace window to reconnect. */
+export function markDisconnected(room: RoomState, playerId: string): void {
+  const player = room.players.get(playerId)
+  if (!player) return
+
+  player.connected = false
+  room.sockets.delete(playerId)
+
+  const timer = setTimeout(() => finalizeRemoval(room, playerId), DISCONNECT_GRACE_MS)
+  room.disconnectTimers.set(playerId, timer)
+}
+
+/** Hard removal once the grace window has expired without a reconnect. */
+export function finalizeRemoval(room: RoomState, playerId: string): void {
+  const timer = room.disconnectTimers.get(playerId)
+  if (timer) clearTimeout(timer)
+  room.disconnectTimers.delete(playerId)
+
   room.players.delete(playerId)
   room.sockets.delete(playerId)
   room.drawOrder = room.drawOrder.filter((id) => id !== playerId)
+  for (const [token, id] of room.playerTokens) {
+    if (id === playerId) room.playerTokens.delete(token)
+  }
 
   if (room.hostId === playerId) {
     const next = room.players.values().next().value as Player | undefined
@@ -66,6 +141,8 @@ export function removePlayer(room: RoomState, playerId: string): void {
   if (room.players.size === 0) {
     scheduleCleanup(room)
   }
+
+  broadcast(room, { type: "room-update", room: toSnapshot(room) })
 }
 
 function scheduleCleanup(room: RoomState): void {
