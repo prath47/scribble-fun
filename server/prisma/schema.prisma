@@ -1,0 +1,28 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model WordPack {
+  id        String   @id @default(uuid())
+  name      String
+  words     String[]
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("word_packs")
+}
+
+model Match {
+  id         String   @id @default(uuid())
+  roomCode   String   @map("room_code")
+  playedAt   DateTime @default(now()) @map("played_at")
+  players    Json
+  rounds     Int
+  wordPackId String?  @map("word_pack_id")
+
+  @@map("matches")
+}

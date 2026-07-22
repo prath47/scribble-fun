@@ -3,6 +3,6 @@ import { recentMatches } from "../db/matches.js"
 
 export function registerMatchRoutes(app: FastifyInstance): void {
   app.get("/api/matches/recent", async () => {
-    return recentMatches(20)
+    return await recentMatches(20)
   })
 }

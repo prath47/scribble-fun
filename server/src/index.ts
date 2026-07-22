@@ -1,6 +1,7 @@
 import cors from "@fastify/cors"
 import websocket from "@fastify/websocket"
 import Fastify from "fastify"
+import { ensureDefaultWordPack } from "./db/client.js"
 import { INSTANCE_ID, PORT, PUBLIC_URL } from "./instanceId.js"
 import { registerRoomOwner } from "./redis/registry.js"
 import { saveRoomSnapshot } from "./redis/snapshot.js"
@@ -9,6 +10,8 @@ import { registerRoomRoutes } from "./routes/rooms.js"
 import { registerWordPackRoutes } from "./routes/wordPacks.js"
 import { listRooms } from "./rooms/store.js"
 import { handleConnection } from "./ws/handlers.js"
+
+await ensureDefaultWordPack()
 
 const app = Fastify({ logger: true })
 

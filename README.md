@@ -24,10 +24,13 @@ A real-time multiplayer draw & guess game, skribbl.io-style. One player draws a 
 
 ## Getting started
 
-Requires [Node.js](https://nodejs.org/) and [pnpm](https://pnpm.io/).
+Requires [Node.js](https://nodejs.org/), [pnpm](https://pnpm.io/), and [Docker](https://www.docker.com/) (for Postgres).
 
 ```bash
+docker compose up -d postgres   # match history + word packs
 pnpm install
+cd server && pnpm db:migrate    # first time only, or after a schema change
+cd ..
 pnpm dev
 ```
 
@@ -40,7 +43,7 @@ pnpm dev:client
 pnpm dev:server
 ```
 
-That's it — no database setup, no accounts, no extra services required to play locally.
+No accounts, no other setup required to play locally.
 
 ## Project structure
 
@@ -54,6 +57,6 @@ scribble-fun/
 
 - **Client:** React, TypeScript, Vite, Tailwind CSS, shadcn/ui, motion (animations), React Router
 - **Server:** Node.js, TypeScript, Fastify, WebSockets
-- **Storage:** SQLite for match history and custom word packs (works out of the box, no setup); Redis is optional and only used if you want to run more than one server instance
+- **Storage:** Postgres (via Prisma) for match history and custom word packs; Redis is optional and only used if you want to run more than one server instance
 
 For details on how reconnect support and multi-server setups work under the hood, see [`PHASE_3.md`](PHASE_3.md).

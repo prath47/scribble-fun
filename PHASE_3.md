@@ -79,12 +79,10 @@ pub/sub relay needed.
   connection errors; if it's unreachable, every registry/snapshot call is a no-op and
   the server behaves exactly like single-instance mode.
 
-**Known limitation:** the SQLite database (word packs, match history) is a local file,
-not a shared/networked store — in this local demo both instances happen to share it
-because they run from the same checkout on the same disk, but on separate machines each
-instance would have its own independent history. A production system would swap SQLite
-for a shared Postgres/managed DB; that's a clean, well-understood next step, not
-attempted here.
+**Update:** word packs and match history now live in Postgres (see §3 below), which
+*is* a shared, networked store — so unlike the original SQLite version, multiple
+instances pointed at the same `DATABASE_URL` genuinely share one history/word-pack set,
+not just an accident of running from the same disk.
 
 **Demo it locally:**
 
@@ -110,26 +108,47 @@ registry TTL to lapse; instance B can now take over the room from its last snaps
 left no trace — no history, no way to play with a different word set.
 
 **How it works:**
-- `server/src/db/client.ts` opens `server/data.sqlite` (gitignored) via
-  `better-sqlite3`, runs an inline migration on boot creating `word_packs` and
-  `matches` tables, and seeds a `"Default"` pack from the existing static word array.
-- `server/src/db/wordPacks.ts` — `listWordPacks`, `createWordPack`,
-  `getWordsForPack` (falls back to the default pack if a room's chosen pack is missing
-  or too small). `engine.ts`'s `pickWordOptions` now calls this instead of importing
-  the static array directly.
+- Postgres + [Prisma](https://www.prisma.io/) (`server/prisma/schema.prisma`) — two
+  models, `WordPack` (id, name, `words String[]`, createdAt) and `Match` (id, roomCode,
+  playedAt, `players Json`, rounds, wordPackId). `server/src/db/client.ts` instantiates
+  the Prisma client and seeds a `"Default"` word pack from the existing static word array
+  on boot if it doesn't already exist.
+- `server/src/db/wordPacks.ts` — `listWordPacks`, `createWordPack`, `getWordsForPack`
+  (falls back to the default pack if a room's chosen pack is missing or too small), all
+  async Prisma queries. `engine.ts`'s `pickWordOptions` now calls this instead of
+  importing the static array directly — which made `pickWordOptions`/`nextTurn` async
+  too (call sites that don't need the result just `void nextTurn(room)`).
 - `server/src/db/matches.ts` — `recordMatch` (called from `engine.ts`'s `nextTurn` the
-  moment a room transitions to `game_end`) and `recentMatches`.
+  moment a room transitions to `game_end`) and `recentMatches`, also async.
 - REST: `GET/POST /api/word-packs`, `GET /api/matches/recent`,
   `POST /api/rooms` now accepts an optional `wordPackId`.
 - Client: `WordPackPicker.tsx` on the landing page — pick an existing pack or open a
   small dialog to paste words and create a custom one (auto-selected once saved).
   `RecentGames.tsx` shows the last few completed matches (winner, player count, rounds,
   time ago) near the info footer.
+- Connection string comes from `DATABASE_URL` (`server/.env`, gitignored — see
+  `server/.env.example` for the local default matching `docker-compose.yml`'s
+  `postgres` service). Migrations live in `server/prisma/migrations/` and are checked
+  into git; run `pnpm db:migrate` after changing the schema.
 
-**Demo it locally:** on the landing page, click the `+` next to the word-pack
-dropdown, name a pack and paste ≥3 words, save it, then create a room — the drawer's
-word choices will only ever come from that pack. Finish a game and refresh the landing
-page to see it appear under "Recent games".
+**Demo it locally:**
+
+```bash
+# 1. start Postgres (and Redis, if also demoing multi-instance)
+docker compose up -d postgres
+
+# 2. apply the schema (first time only, or after schema changes)
+cd server && pnpm db:migrate
+
+# 3. run the app as usual
+pnpm dev
+```
+
+On the landing page, click the `+` next to the word-pack dropdown, name a pack and
+paste ≥3 words, save it, then create a room — the drawer's word choices will only ever
+come from that pack. Finish a game and refresh the landing page to see it appear under
+"Recent games". `pnpm db:studio` opens Prisma Studio if you want to browse the tables
+directly.
 
 ## Verification performed
 
@@ -143,6 +162,8 @@ page to see it appear under "Recent games".
   completed a full join handshake. Killed instance A, waited for the registry TTL to
   lapse, confirmed instance B successfully rehydrated the room from its Redis snapshot
   (preserved player/score) and claimed ownership.
-- Persistence: created a custom "Animals Only" word pack via the UI, started a game
-  with it, and confirmed all three word options offered to the drawer came from that
-  pack (not the default list).
+- Persistence: migrated a real Postgres instance (`docker compose up -d postgres` +
+  `pnpm db:migrate`), confirmed the default word pack seeds correctly on boot, created a
+  custom word pack via the REST API and confirmed it's queryable afterward, then played
+  a full 4-round game via browser automation end-to-end and confirmed the completed
+  match (both players' final scores) showed up via `GET /api/matches/recent`.

@@ -20,8 +20,8 @@ function clearTimers(room: RoomState): void {
   room.timers = { roundTimer: null, hintTimers: [], chooseWordTimer: null, nextTurnTimer: null }
 }
 
-function pickWordOptions(room: RoomState): string[] {
-  const words = getWordsForPack(room.wordPackId)
+async function pickWordOptions(room: RoomState): Promise<string[]> {
+  const words = await getWordsForPack(room.wordPackId)
   const pool = words.filter((w) => !room.usedWords.has(w))
   const source = pool.length >= WORD_OPTIONS_COUNT ? pool : words
   const picked: string[] = []
@@ -63,10 +63,10 @@ export function beginGame(room: RoomState): void {
   room.roundNumber = 0
   room.totalRounds = room.drawOrder.length * ROUNDS_PER_PLAYER
 
-  nextTurn(room)
+  void nextTurn(room)
 }
 
-export function nextTurn(room: RoomState): void {
+export async function nextTurn(room: RoomState): Promise<void> {
   clearTimers(room)
   room.currentWord = null
   room.pendingWordOptions = []
@@ -78,7 +78,7 @@ export function nextTurn(room: RoomState): void {
     room.phase = "game_end"
     room.currentDrawerId = null
     if (room.roundNumber > 0) {
-      recordMatch(room.code, Array.from(room.players.values()), room.roundNumber, room.wordPackId)
+      await recordMatch(room.code, Array.from(room.players.values()), room.roundNumber, room.wordPackId)
     }
     broadcast(room, { type: "room-update", room: toSnapshot(room) })
     return
@@ -87,7 +87,7 @@ export function nextTurn(room: RoomState): void {
   const drawerId = room.drawOrder[room.drawOrderIndex % room.drawOrder.length]
   const drawer = room.players.get(drawerId)
   if (!drawer) {
-    nextTurn(room)
+    void nextTurn(room)
     return
   }
 
@@ -95,7 +95,7 @@ export function nextTurn(room: RoomState): void {
   room.currentDrawerId = drawerId
   room.phase = "choosing_word"
 
-  const options = pickWordOptions(room)
+  const options = await pickWordOptions(room)
   room.pendingWordOptions = options
 
   sendTo(room, drawerId, { type: "word-options", words: options })
@@ -206,7 +206,7 @@ export function endRound(room: RoomState): void {
   const word = room.currentWord ?? ""
   broadcast(room, { type: "round-reveal", room: toSnapshot(room), word })
 
-  room.timers.nextTurnTimer = setTimeout(() => nextTurn(room), REVEAL_PAUSE_MS)
+  room.timers.nextTurnTimer = setTimeout(() => void nextTurn(room), REVEAL_PAUSE_MS)
 }
 
 export function handleDrawerDisconnect(room: RoomState, playerId: string): void {
@@ -215,6 +215,6 @@ export function handleDrawerDisconnect(room: RoomState, playerId: string): void 
     endRound(room)
   } else if (room.phase === "choosing_word") {
     clearTimers(room)
-    nextTurn(room)
+    void nextTurn(room)
   }
 }
